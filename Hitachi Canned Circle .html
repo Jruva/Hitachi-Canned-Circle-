@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Drill Toolpath Generator</title>
+<style>
+  :root{
+    --bg:#f0f2f5; --white:#ffffff; --blue:#2563eb; --blue-dk:#1d4ed8;
+    --green:#16a34a; --gray-btn:#e2e8f0; --border:#cbd5e1; --text:#1e293b;
+    --accent:#eff6ff; --accent-b:#bfdbfe; --gray-txt:#64748b;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  }
+  .bar{ background:var(--blue); color:var(--white); padding:14px 24px; display:flex; align-items:baseline; gap:14px; }
+  .bar h1{ font-size:18px; margin:0; font-weight:700; }
+  .bar span{ font-size:11px; color:#93c5fd; }
+  .body{ display:flex; padding:18px; gap:16px; align-items:flex-start; }
+  .left{ width:380px; flex:0 0 380px; }
+  .right{ flex:1; min-width:0; }
+  .section-label{ font-size:12px; font-weight:700; color:var(--gray-txt); margin:14px 0 4px; text-transform:uppercase; letter-spacing:.02em;}
+  .card{ background:var(--white); border:1px solid var(--border); }
+  .field{ padding:8px 16px; }
+  .field label{ display:block; font-size:13px; margin-bottom:4px; }
+  .field input{
+    width:100%; font-size:14px; padding:6px 8px; border:1px solid var(--border);
+    background:#f8fafc; font-family:inherit; color:var(--text);
+  }
+  .field input:focus{ outline:2px solid var(--blue); outline-offset:-1px; }
+  button{
+    font-family:inherit; border:none; cursor:pointer; padding:8px 12px;
+    font-size:12px; font-weight:700; background:var(--gray-btn); color:var(--text);
+  }
+  button:hover{ filter:brightness(0.97); }
+  button.primary{ background:var(--blue); color:var(--white); font-size:13px; padding:10px 12px; }
+  button.green{ background:var(--green); color:var(--white); }
+  button.blue-sm{ background:var(--blue); color:var(--white); }
+  .full{ width:100%; display:block; }
+  .row{ display:flex; gap:8px; padding:0 16px 8px; }
+  .row.top{ padding-top:12px; }
+  .divider{ border-top:1px solid var(--border); margin:10px 16px; }
+  .stats{ display:flex; gap:6px; padding:0 16px 14px; }
+  .stat{ flex:1; background:var(--accent); border:1px solid var(--accent-b); text-align:center; padding:6px 2px; }
+  .stat .t{ font-size:10px; color:var(--blue); }
+  .stat .v{ font-size:14px; font-weight:700; margin-top:2px; }
+  .xy-row input{ width:100%; }
+  .hole-list{
+    height:110px; overflow-y:auto; background:#f8fafc; border:1px solid var(--border);
+    margin:0 14px 14px; font-family:"Courier New",monospace; font-size:12px;
+  }
+  .hole-list div{ padding:3px 8px; cursor:pointer; }
+  .hole-list div.sel{ background:var(--blue); color:var(--white); }
+  .canvas-wrap{ background:var(--white); border:1px solid var(--border); }
+  canvas{ display:block; width:100%; height:560px; }
+  dialog{ border:1px solid var(--border); padding:0; width:460px; max-width:90vw; }
+  dialog::backdrop{ background:rgba(0,0,0,0.35); }
+  .dialog-inner{ padding:16px; }
+  .dialog-inner h2{ font-size:14px; margin:0 0 4px; }
+  .dialog-inner p.hint{ font-size:11px; color:var(--gray-txt); margin:0 0 10px; white-space:pre-line; }
+  textarea{
+    width:100%; height:220px; font-family:"Courier New",monospace; font-size:12px;
+    background:#f8fafc; border:1px solid var(--border); padding:8px; resize:vertical;
+  }
+  .radio-row{ font-size:12px; margin-top:10px; display:flex; gap:16px; }
+  .btn-row{ display:flex; gap:8px; margin-top:14px; }
+  small.legend-item{ display:block; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>Drill Toolpath Generator</h1>
+  <span>inches&nbsp;&nbsp;|&nbsp;&nbsp;G-code export&nbsp;&nbsp;|&nbsp;&nbsp;runs in your browser, no install</span>
+</div>
+
+<div class="body">
+  <div class="left">
+
+    <div class="section-label">Tool Settings</div>
+    <div class="card">
+      <div class="field"><label>Drill 1 Diameter — Tool (in):</label><input id="d1" value="0.5000"></div>
+      <div class="field"><label>Drill 2 Diameter — Target (in):</label><input id="d2" value="1.5000"></div>
+      <div class="field"><label>Points Around Toolpath:</label><input id="npts" value="8"></div>
+      <div style="padding:8px 16px 6px;"><button class="primary full" id="btnGenerate">Generate Toolpath</button></div>
+      <div class="divider"></div>
+      <div class="stats">
+        <div class="stat"><div class="t">D1 Radius</div><div class="v" id="statR1">—</div></div>
+        <div class="stat"><div class="t">D2 Radius</div><div class="v" id="statR2">—</div></div>
+        <div class="stat"><div class="t">Toolpath R</div><div class="v" id="statRpath">—</div></div>
+        <div class="stat"><div class="t">Step Angle</div><div class="v" id="statStep">—</div></div>
+      </div>
+    </div>
+
+    <div class="section-label">Hole Locations (machine position)</div>
+    <div class="card">
+      <div class="row top" style="padding-bottom:0;">
+        <label style="font-size:13px;width:50%;">X Position:</label>
+        <label style="font-size:13px;width:50%;">Y Position:</label>
+      </div>
+      <div class="row xy-row">
+        <input id="hx" value="0.0000">
+        <input id="hy" value="0.0000">
+      </div>
+      <div class="row">
+        <button class="green" id="btnAddHole">Add Hole</button>
+        <button id="btnRemoveHole">Remove Selected</button>
+        <button id="btnClearHoles">Clear All</button>
+      </div>
+      <div class="row">
+        <button class="blue-sm" id="btnPasteList">Paste List…</button>
+        <button class="blue-sm" id="btnGrid">Generate Grid…</button>
+      </div>
+      <div class="hole-list" id="holeList"></div>
+    </div>
+
+    <div class="section-label">Export</div>
+    <div class="card">
+      <div class="row top" style="padding-bottom:12px;">
+        <button class="primary" id="btnCopyGcode">Copy G-code</button>
+        <button class="green" id="btnSaveGcode">Save G-code (.nc)</button>
+        <button id="btnSaveCoords">Save Coords (.txt)</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="right">
+    <div class="section-label">Visualization</div>
+    <div class="canvas-wrap">
+      <canvas id="cv"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Paste List dialog -->
+<dialog id="pasteDialog">
+  <div class="dialog-inner">
+    <h2>Paste Hole Coordinates</h2>
+    <p class="hint">Paste X Y pairs below — one per line.
+Accepts:  "1.25 2.5"   "1.25, 2.5"   "X1.25Y2.5"
+Lines starting with # are ignored.</p>
+    <textarea id="pasteText" placeholder="X04.100Y17.695
+X00.300Y17.695
+X00.300Y00.305
+..."></textarea>
+    <div class="radio-row">
+      <label><input type="radio" name="pasteMode" value="append" checked> Append to current list</label>
+      <label><input type="radio" name="pasteMode" value="replace"> Replace current list</label>
+    </div>
+    <div class="btn-row">
+      <button class="green" id="btnPasteAdd">Add to List</button>
+      <button id="btnPasteCancel">Cancel</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Grid Generator dialog -->
+<dialog id="gridDialog">
+  <div class="dialog-inner" style="width:auto;">
+    <h2>Generate Hole Grid</h2>
+    <p class="hint">Create a rectangular array of holes.</p>
+    <div class="card" style="border:1px solid var(--border);">
+      <div class="field"><label>Start X (in):</label><input id="gStartX" value="0.0000"></div>
+      <div class="field"><label>Start Y (in):</label><input id="gStartY" value="0.0000"></div>
+      <div class="field"><label>Columns (X count):</label><input id="gCols" value="3"></div>
+      <div class="field"><label>Rows (Y count):</label><input id="gRows" value="3"></div>
+      <div class="field"><label>X Spacing (in):</label><input id="gDx" value="1.0000"></div>
+      <div class="field"><label>Y Spacing (in):</label><input id="gDy" value="1.0000"></div>
+    </div>
+    <div class="radio-row">
+      <label><input type="radio" name="gridMode" value="append" checked> Append to current list</label>
+      <label><input type="radio" name="gridMode" value="replace"> Replace current list</label>
+    </div>
+    <div class="btn-row">
+      <button class="green" id="btnGridGenerate">Generate</button>
+      <button id="btnGridCancel">Cancel</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- state ----------
+  let coords = [];   // toolpath points relative to hole center: [{x,y}, ...] incl. center as first
+  let holes  = [];   // machine positions: [{x,y}, ...]
+  let toolInfo = null; // {d1,d2,n,r1,r2,rPath}
+  let selectedHoleIdx = -1;
+
+  const $ = id => document.getElementById(id);
+
+  // ---------- math ----------
+  function computeCoords(d1, d2, n){
+    const r1 = d1/2, r2 = d2/2, rPath = r2 - r1;
+    const pts = [{x:0,y:0}];
+    for(let i=0;i<n;i++){
+      const deg = (360/n)*i;
+      const rad = deg * Math.PI/180;
+      pts.push({x: rPath*Math.cos(rad), y: rPath*Math.sin(rad)});
+    }
+    return {r1, r2, rPath, pts};
+  }
+
+  const PAIR_RE = /[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g;
+
+  function parseCoordLines(text){
+    const pairs = [];
+    let bad = 0;
+    text.split(/\r?\n/).forEach(raw=>{
+      const line = raw.trim();
+      if(!line || line.startsWith("#")) return;
+      const nums = line.match(PAIR_RE);
+      if(nums && nums.length >= 2){
+        const x = parseFloat(nums[0]);
+        const y = parseFloat(nums[1]);
+        if(!isNaN(x) && !isNaN(y)) pairs.push({x,y});
+        else bad++;
+      } else {
+        bad++;
+      }
+    });
+    return {pairs, bad};
+  }
+
+  // ---------- hole list UI ----------
+  function refreshHoleList(){
+    const el = $("holeList");
+    el.innerHTML = "";
+    holes.forEach((h,i)=>{
+      const d = document.createElement("div");
+      d.textContent = `  #${String(i+1).padStart(2," ")}   X${h.x.toFixed(4)}   Y${h.y.toFixed(4)}`;
+      if(i===selectedHoleIdx) d.classList.add("sel");
+      d.addEventListener("click", ()=>{
+        selectedHoleIdx = i;
+        refreshHoleList();
+      });
+      el.appendChild(d);
+    });
+  }
+
+  function addHole(x,y){
+    holes.push({x,y});
+  }
+
+  $("btnAddHole").addEventListener("click", ()=>{
+    const x = parseFloat($("hx").value);
+    const y = parseFloat($("hy").value);
+    if(isNaN(x) || isNaN(y)){
+      alert("Please enter valid numbers for X and Y hole position.");
+      return;
+    }
+    addHole(x,y);
+    refreshHoleList();
+  });
+
+  function addHoleAndRefocus(focusId){
+    const x = parseFloat($("hx").value);
+    const y = parseFloat($("hy").value);
+    if(isNaN(x) || isNaN(y)){
+      alert("Please enter valid numbers for X and Y hole position.");
+      return;
+    }
+    addHole(x,y);
+    refreshHoleList();
+    const el = $(focusId);
+    el.focus();
+    el.select();
+  }
+  ["hx","hy"].forEach(id=>{
+    $(id).addEventListener("keydown", e=>{
+      if(e.key === "Enter"){ e.preventDefault(); addHoleAndRefocus("hx"); }
+    });
+  });
+
+  $("btnRemoveHole").addEventListener("click", ()=>{
+    if(selectedHoleIdx < 0){
+      alert("Click a hole in the list to select it, then press Remove Selected.");
+      return;
+    }
+    holes.splice(selectedHoleIdx,1);
+    selectedHoleIdx = -1;
+    refreshHoleList();
+  });
+
+  $("btnClearHoles").addEventListener("click", ()=>{
+    holes = [];
+    selectedHoleIdx = -1;
+    refreshHoleList();
+  });
+
+  // ---------- paste list dialog ----------
+  const pasteDialog = $("pasteDialog");
+  $("btnPasteList").addEventListener("click", ()=>{
+    $("pasteText").value = "";
+    pasteDialog.showModal();
+    $("pasteText").focus();
+  });
+  $("btnPasteCancel").addEventListener("click", ()=> pasteDialog.close());
+  $("btnPasteAdd").addEventListener("click", ()=>{
+    const {pairs, bad} = parseCoordLines($("pasteText").value);
+    if(pairs.length === 0){
+      alert("No valid X Y pairs were found in the pasted text.");
+      return;
+    }
+    const mode = document.querySelector('input[name="pasteMode"]:checked').value;
+    if(mode === "replace") holes = [];
+    holes = holes.concat(pairs);
+    selectedHoleIdx = -1;
+    refreshHoleList();
+    let msg = `Added ${pairs.length} hole(s).`;
+    if(bad) msg += `\nSkipped ${bad} line(s) that couldn't be parsed.`;
+    pasteDialog.close();
+    alert(msg);
+  });
+
+  // ---------- grid generator dialog ----------
+  const gridDialog = $("gridDialog");
+  $("btnGrid").addEventListener("click", ()=> gridDialog.showModal());
+  $("btnGridCancel").addEventListener("click", ()=> gridDialog.close());
+  $("btnGridGenerate").addEventListener("click", ()=>{
+    const sx = parseFloat($("gStartX").value);
+    const sy = parseFloat($("gStartY").value);
+    const cols = parseInt($("gCols").value,10);
+    const rows = parseInt($("gRows").value,10);
+    const dx = parseFloat($("gDx").value);
+    const dy = parseFloat($("gDy").value);
+    if([sx,sy,dx,dy].some(isNaN) || !(cols>=1) || !(rows>=1)){
+      alert("Check inputs: rows/columns must be whole numbers ≥ 1,\nspacing and start position must be numbers.");
+      return;
+    }
+    const mode = document.querySelector('input[name="gridMode"]:checked').value;
+    if(mode === "replace") holes = [];
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        holes.push({x: sx + c*dx, y: sy + r*dy});
+      }
+    }
+    selectedHoleIdx = -1;
+    refreshHoleList();
+    gridDialog.close();
+    alert(`Added ${rows*cols} hole(s) (${rows} × ${cols} grid).`);
+  });
+
+  // ---------- generate toolpath ----------
+  $("btnGenerate").addEventListener("click", ()=>{
+    const d1 = parseFloat($("d1").value);
+    const d2 = parseFloat($("d2").value);
+    const n  = parseInt($("npts").value,10);
+    if(isNaN(d1) || isNaN(d2) || isNaN(n) || d1<=0 || d2<=0 || n<2){
+      alert("Please check your inputs:\n• Diameters must be numbers > 0\n• Points must be a whole number ≥ 2");
+      return;
+    }
+    if(d1 >= d2){
+      alert("Drill 1 (tool) must be smaller than Drill 2 (target).");
+      return;
+    }
+    const {r1,r2,rPath,pts} = computeCoords(d1,d2,n);
+    coords = pts;
+    toolInfo = {d1,d2,n,r1,r2,rPath};
+
+    $("statR1").textContent = r1.toFixed(4)+'"';
+    $("statR2").textContent = r2.toFixed(4)+'"';
+    $("statRpath").textContent = rPath.toFixed(4)+'"';
+    $("statStep").textContent = (360/n).toFixed(1)+"°";
+
+    draw();
+  });
+
+  // ---------- canvas drawing ----------
+  const canvas = $("cv");
+  const ctx = canvas.getContext("2d");
+
+  function resizeCanvas(){
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    if(toolInfo) draw(); else drawPlaceholder();
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  function drawPlaceholder(){
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = "#64748b";
+    ctx.font = "13px Tahoma, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Enter values and click  Generate Toolpath", w/2, h/2);
+  }
+
+  function draw(){
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0,0,w,h);
+    if(!toolInfo) { drawPlaceholder(); return; }
+    const {d1,d2,r1,r2,rPath,n} = toolInfo;
+
+    const pad = r2 * 0.32;
+    const span = (r2+pad)*2;
+    const scale = Math.min(w,h) / span;
+    const cx = w/2, cy = h/2;
+    const X = v => cx + v*scale;
+    const Y = v => cy - v*scale; // flip y
+
+    // grid lines through center
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0,Y(0)); ctx.lineTo(w,Y(0)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(X(0),0); ctx.lineTo(X(0),h); ctx.stroke();
+
+    // D2 target circle (dashed gray)
+    ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 2;
+    ctx.setLineDash([8,5]);
+    ctx.beginPath(); ctx.arc(X(0),Y(0), r2*scale, 0, Math.PI*2); ctx.stroke();
+
+    // toolpath radius circle (dotted blue)
+    ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 1.4;
+    ctx.setLineDash([2,4]);
+    ctx.beginPath(); ctx.arc(X(0),Y(0), rPath*scale, 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    const pathPts = coords.slice(1);
+
+    // drill1 tool circles at each point
+    pathPts.forEach(p=>{
+      ctx.beginPath();
+      ctx.fillStyle = "rgba(219,234,254,0.55)";
+      ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 0.9;
+      ctx.arc(X(p.x), Y(p.y), r1*scale, 0, Math.PI*2);
+      ctx.fill(); ctx.stroke();
+    });
+
+    // connecting path (dashed green)
+    if(pathPts.length > 1){
+      ctx.strokeStyle = "rgba(16,185,129,0.7)"; ctx.lineWidth = 1;
+      ctx.setLineDash([6,4]);
+      ctx.beginPath();
+      pathPts.forEach((p,i)=>{
+        if(i===0) ctx.moveTo(X(p.x),Y(p.y)); else ctx.lineTo(X(p.x),Y(p.y));
+      });
+      ctx.lineTo(X(pathPts[0].x), Y(pathPts[0].y));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // point markers + numbers
+    pathPts.forEach((p,i)=>{
+      ctx.beginPath();
+      ctx.fillStyle = "#2563eb";
+      ctx.arc(X(p.x), Y(p.y), 4, 0, Math.PI*2);
+      ctx.fill();
+
+      const deg = (360/n)*i;
+      const rad = deg*Math.PI/180;
+      const lx = (rPath + r1*0.6)*Math.cos(rad);
+      const ly = (rPath + r1*0.6)*Math.sin(rad);
+      ctx.fillStyle = "#1e40af";
+      ctx.font = "bold 11px Tahoma, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(i+1), X(lx), Y(ly));
+    });
+
+    // center marker
+    ctx.beginPath();
+    ctx.fillStyle = "#ef4444";
+    ctx.arc(X(0),Y(0), 5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "#ef4444";
+    ctx.font = "9px Tahoma, sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText("CENTER  X0.0000 Y0.0000", X(0)+8, Y(0)+4);
+
+    // title
+    ctx.fillStyle = "#1e293b";
+    ctx.font = "12px Tahoma, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(`Drill 2: Ø${d2.toFixed(4)}"   Drill 1: Ø${d1.toFixed(4)}"   ${n} points`, w/2, 8);
+
+    // legend box (top-right)
+    drawLegend(w,h,d1,d2,rPath);
+  }
+
+  function drawLegend(w,h,d1,d2,rPath){
+    const items = [
+      {swatch:"line", color:"#94a3b8", dash:[8,5], label:`Drill 2 target  Ø${d2.toFixed(4)}"`},
+      {swatch:"line", color:"#2563eb", dash:[2,4], label:`Toolpath  R=${rPath.toFixed(4)}"`},
+      {swatch:"box", color:"#2563eb", fill:"rgba(219,234,254,0.7)", label:`Drill 1 tool  Ø${d1.toFixed(4)}"`},
+      {swatch:"line", color:"#10b981", dash:[6,4], label:"Point path"},
+    ];
+    ctx.font = "10px Tahoma, sans-serif";
+    const lineH = 18;
+    const boxW = 190, boxH = items.length*lineH + 14;
+    const bx = w - boxW - 14, by = 26;
+
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1;
+    ctx.fillRect(bx,by,boxW,boxH);
+    ctx.strokeRect(bx,by,boxW,boxH);
+
+    items.forEach((it,i)=>{
+      const yy = by + 12 + i*lineH;
+      if(it.swatch === "line"){
+        ctx.strokeStyle = it.color; ctx.lineWidth = 2;
+        ctx.setLineDash(it.dash || []);
+        ctx.beginPath(); ctx.moveTo(bx+10,yy); ctx.lineTo(bx+34,yy); ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = it.fill; ctx.strokeStyle = it.color; ctx.lineWidth = 1;
+        ctx.fillRect(bx+10,yy-6,24,10);
+        ctx.strokeRect(bx+10,yy-6,24,10);
+      }
+      ctx.fillStyle = "#1e293b";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(it.label, bx+42, yy);
+    });
+  }
+
+  // ---------- export ----------
+  const HEADER = [
+    "M48",
+    "(D1875RDX472)",
+    "T1C0.1875F040S20.U1000.Z-0.022H10000",
+    "FMAT,2",
+    "VER,1",
+    "INCH,LZ",
+    "ZC,X-10.2375Y-0.5375",
+    "UP,1.000",
+    "DN,0.285",
+    "%",
+    "T1"
+  ].join("\n");
+
+  function checkReady(){
+    if(coords.length === 0){ alert("Click  Generate Toolpath  first."); return false; }
+    if(holes.length === 0){ alert("Add at least one hole location before exporting."); return false; }
+    return true;
+  }
+
+  function buildGcode(){
+    const lines = [HEADER, ""];
+    holes.forEach(h=>{
+      lines.push("(X and Y Position for canned circle start)");
+      lines.push(`G93X${h.x.toFixed(4)}Y${h.y.toFixed(4)}`);
+      lines.push("(the canned circle positions calculated by the program)");
+      coords.forEach(p=>{
+        lines.push(`X${p.x.toFixed(4)} Y${p.y.toFixed(4)}`);
+      });
+      lines.push("");
+    });
+    lines.push("M30");
+    return lines.join("\n").trim();
+  }
+
+  function buildCoordsText(){
+    return coords.map(p => `X${p.x.toFixed(4)} Y${p.y.toFixed(4)}`).join("\n");
+  }
+
+  function downloadText(filename, text){
+    const blob = new Blob([text], {type:"text/plain"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  $("btnCopyGcode").addEventListener("click", async ()=>{
+    if(!checkReady()) return;
+    const text = buildGcode();
+    try{
+      await navigator.clipboard.writeText(text);
+      alert("G-code copied to clipboard.");
+    }catch(e){
+      // fallback
+      const ta = document.createElement("textarea");
+      ta.value = text; document.body.appendChild(ta);
+      ta.select(); document.execCommand("copy");
+      document.body.removeChild(ta);
+      alert("G-code copied to clipboard.");
+    }
+  });
+
+  $("btnSaveGcode").addEventListener("click", ()=>{
+    if(!checkReady()) return;
+    downloadText("toolpath.nc", buildGcode());
+  });
+
+  $("btnSaveCoords").addEventListener("click", ()=>{
+    if(coords.length === 0){ alert("Generate a toolpath first."); return; }
+    downloadText("coords.txt", buildCoordsText());
+  });
+
+  // ---------- init ----------
+  resizeCanvas();
+  refreshHoleList();
+})();
+</script>
+</body>
+</html>
